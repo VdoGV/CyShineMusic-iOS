@@ -10,7 +10,6 @@ import '../shell_navigation.dart';
 import '../shell_route_utils.dart';
 import 'floating_player_bar.dart';
 import 'toolbar_action.dart';
-import 'toolbar_capsule.dart';
 import 'toolbar_metrics.dart';
 
 // The navigation capsule is the primary control; the player capsule above it
