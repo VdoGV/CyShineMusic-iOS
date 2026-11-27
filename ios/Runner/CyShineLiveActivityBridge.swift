@@ -374,6 +374,13 @@ final class CyShineLiveActivityBridge: NSObject {
       info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in
         image
       }
+    } else if let existing = MPNowPlayingInfoCenter.default()
+                .nowPlayingInfo?[MPMediaItemPropertyArtwork] {
+      // ★ 这里整体替换 nowPlayingInfo，如果自己拿不到封面就直接不写 artwork，
+      //   会把 audio_service 已经写好的缩略图一起抹掉 —— 卡片变成"有字没图"。
+      //   拿不到就沿用系统里已有的那张。App Group 在免费签名下拿不到时，
+      //   走的就是这条路径。
+      info[MPMediaItemPropertyArtwork] = existing
     }
 
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info

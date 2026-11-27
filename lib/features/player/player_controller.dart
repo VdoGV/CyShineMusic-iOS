@@ -1228,6 +1228,7 @@ class PlayerController extends StateNotifier<PlayerState>
       track,
       duration: duration,
       artUri: localArt ?? _networkArtworkUri(track.coverUrl),
+      artCachePath: localArt?.toFilePath(),
     );
   }
 
@@ -1259,6 +1260,7 @@ class PlayerController extends StateNotifier<PlayerState>
     PlayerTrack track, {
     Duration? duration,
     Uri? artUri,
+    String? artCachePath,
   }) {
     final album = track.album.trim();
     final sourceDescription = [
@@ -1280,6 +1282,9 @@ class PlayerController extends StateNotifier<PlayerState>
         'trackKind': track.kind.name,
         'source': track.sourceLabel,
         'quality': track.qualityLabel,
+        // audio_service 的 darwin 实现只从 extras['artCacheFile'] 读封面路径，
+        // 见 player_audio_handler.cacheArtwork 的注释。
+        if (artCachePath != null) 'artCacheFile': artCachePath,
       },
     );
   }

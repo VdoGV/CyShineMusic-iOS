@@ -283,13 +283,19 @@ Future<dynamic> _handleNativeCall(MethodCall call) async {
   Future<Map<String, dynamic>> _coverPayload() async {
     try {
       final track = _ref.read(playerControllerProvider).track;
-      final embedded = await _ref
-          .read(playerAudioHandlerProvider)
-          .cacheArtwork(track?.coverBytes);
-      final cover =
-          embedded?.toString() ??
-          CoverImageSource.normalizeUrl(track?.coverUrl, size: 512) ??
-          '';
+      final handler = _ref.read(playerAudioHandlerProvider);
+      final normalized = CoverImageSource.normalizeUrl(
+        track?.coverUrl,
+        size: 512,
+      );
+      // 内嵌封面优先；没有就让 handler 下载后落盘。传给原生的必须是本地
+      // file:// 路径 —— 原生侧只认本地文件（App Group 在免费签名下拿不到，
+      // 网络 URL 更是直接被忽略）。
+      final local = await handler.cacheArtwork(
+        track?.coverBytes,
+        fallbackUrl: normalized,
+      );
+      final cover = local?.toString() ?? normalized ?? '';
       return {'cover': cover, 'headers': CoverImageSource.headersFor(cover) ?? {}};
     } catch (error) {
       await AppLogger.write('live-activity', '封面处理失败: $error');

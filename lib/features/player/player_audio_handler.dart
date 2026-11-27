@@ -123,6 +123,10 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   MediaItem? _mediaItemBeforeTransition;
   int? _queueIndexBeforeTransition;
   bool _trackTransitionActive = false;
+  /// artUri → 本地封面路径（iOS 锁屏卡片用），避免同一张封面反复下载。
+  final Map<String, String> _artFilePathByUri = {};
+  /// 正在下载中的 artUri，避免并发重复请求。
+  final Set<String> _artFilePending = {};
 
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
@@ -256,6 +260,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     _queueIndex = queueIndex;
     _currentMediaItem = item;
     mediaItem.add(item);
+    unawaited(_enrichArtCacheFile(item));
     _broadcastState(_player.snapshot);
     if (_player.playing) {
       _logTransport('pause', reason: 'track_transition');
@@ -295,6 +300,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     _queueIndex = queueIndex;
     _currentMediaItem = item;
     mediaItem.add(item);
+    unawaited(_enrichArtCacheFile(item));
     final resolvedDuration = await _loadSourceBounded(
       sourceUri,
       formatHint: item.extras?['quality']?.toString(),
@@ -369,6 +375,8 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
             item.copyWith(duration: resolvedDuration),
           );
     mediaItem.add(_currentMediaItem);
+    final current = _currentMediaItem;
+    if (current != null) unawaited(_enrichArtCacheFile(current));
   }
 
   void publishQueue(List<MediaItem> items, {int? currentIndex}) {
@@ -419,6 +427,81 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
       await file.writeAsBytes(data, flush: true);
     }
     return file.uri;
+  }
+
+  /// 给 `MediaItem` 补上 `extras['artCacheFile']`（**普通绝对路径**）。
+  ///
+  /// ★ 锁屏卡片没封面的另一半原因：`audio_service` 的 darwin 实现
+  /// （`AudioServicePlugin.m` 的 `setMediaItem`）只认 `extras['artCacheFile']`
+  /// 里的路径，用 `UIImage imageWithContentsOfFile:` 读盘。只把封面写成
+  /// `file://` URI 塞进 `artUri` 是不够的 —— 那条 URI 会被整条忽略，
+  /// artwork 恒为 nil，而整个链路一声不响。
+  MediaItem _withArtCacheFile(MediaItem item, String path) {
+    return MediaItem(
+      id: item.id,
+      title: item.title,
+      album: item.album,
+      artist: item.artist,
+      genre: item.genre,
+      duration: item.duration,
+      artUri: item.artUri,
+      artHeaders: item.artHeaders,
+      playable: item.playable,
+      displayTitle: item.displayTitle,
+      displaySubtitle: item.displaySubtitle,
+      displayDescription: item.displayDescription,
+      rating: item.rating,
+      isLive: item.isLive,
+      extras: <String, dynamic>{...?item.extras, 'artCacheFile': path},
+    );
+  }
+
+  /// 补好 `artCacheFile` 的新 item；无处可补时返回 null（非 iOS / 已补过 / 取不到封面）。
+  Future<MediaItem?> _artCachedItem(MediaItem item) async {
+    if (!Platform.isIOS) return null;
+    final existing = item.extras?['artCacheFile'];
+    if (existing is String &&
+        existing.isNotEmpty &&
+        File(existing).existsSync()) {
+      return null;
+    }
+    final artUri = item.artUri;
+    if (artUri == null) return null;
+    final key = artUri.toString();
+    final memoized = _artFilePathByUri[key];
+    if (memoized != null && File(memoized).existsSync()) {
+      return _withArtCacheFile(item, memoized);
+    }
+    // 同一张封面被连续几次元数据更新同时触发时，只下载一次。
+    if (!_artFilePending.add(key)) return null;
+    String? path;
+    try {
+      if (artUri.isScheme('file')) {
+        final candidate = artUri.toFilePath();
+        if (File(candidate).existsSync()) path = candidate;
+      } else if (artUri.isScheme('http') || artUri.isScheme('https')) {
+        final cached = await cacheArtwork(null, fallbackUrl: key);
+        path = cached?.toFilePath();
+      }
+    } finally {
+      _artFilePending.remove(key);
+    }
+    if (path == null) return null;
+    _artFilePathByUri[key] = path;
+    return _withArtCacheFile(item, path);
+  }
+
+  /// 先让卡片有文字，再把封面补进去 —— 下载可能要几百毫秒，不能卡住播放。
+  Future<void> _enrichArtCacheFile(MediaItem item) async {
+    final enriched = await _artCachedItem(item);
+    if (enriched == null) return;
+    final current = _currentMediaItem;
+    if (current == null || current.id != item.id) return;
+    _currentMediaItem = enriched;
+    mediaItem.add(enriched);
+    unawaited(
+      AppLogger.write('artwork', 'artCacheFile=${enriched.extras?['artCacheFile']}'),
+    );
   }
 
   /// 下载网络封面。失败一律走日志页而不是静默 —— 锁屏没封面最难查，
