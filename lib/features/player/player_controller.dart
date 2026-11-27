@@ -1757,6 +1757,10 @@ class PlayerController extends StateNotifier<PlayerState>
     }
     if (state != AppLifecycleState.resumed) {
       _persistPositionCheckpoint();
+    } else if (_audioHandler.playing) {
+      // 回到前台时补一次软认领：系统可能在这段时间把「当前播放应用」
+      // 的归属记到了别的 App（典型是侧载安装器），点控制中心卡片就会跳走。
+      unawaited(_audioHandler.reinforceNowPlayingSession());
     }
   }
 

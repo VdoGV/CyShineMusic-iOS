@@ -149,7 +149,9 @@ final class CyShineLiveActivityBridge: NSObject {
 
     case "reassertSession":
       // 开始播放前重新认领一次 Now Playing 归属（见方法注释）。
-      result(reassertPlaybackSession())
+      // deactivate=false 是「软」认领：播放中调用，不会让声音断掉。
+      let deactivate = ((call.arguments as? [String: Any])?["deactivate"] as? Bool) ?? true
+      result(reassertPlaybackSession(deactivate: deactivate))
 
     case "end":
       endActivity(policy: .immediate)
@@ -406,16 +408,20 @@ final class CyShineLiveActivityBridge: NSObject {
   ///
   ///   调用时机必须是「还没有声音输出」的时候（播放前 / 暂停时），否则停用
   ///   会话会让音频短暂断掉，听感上像卡了一下。
-  private func reassertPlaybackSession() -> [String: Any] {
+  private func reassertPlaybackSession(deactivate: Bool) -> [String: Any] {
     let session = AVAudioSession.sharedInstance()
     var steps: [String] = []
 
-    do {
-      try session.setActive(false)
-      steps.append("deactivate=ok")
-    } catch {
-      // 会话本来就没激活时会报错，属正常情况，不影响后面重新配置。
-      steps.append("deactivate=\(Self.describe(error))")
+    if deactivate {
+      do {
+        try session.setActive(false)
+        steps.append("deactivate=ok")
+      } catch {
+        // 会话本来就没激活时会报错，属正常情况，不影响后面重新配置。
+        steps.append("deactivate=\(Self.describe(error))")
+      }
+    } else {
+      steps.append("deactivate=skipped")
     }
 
     do {
@@ -444,9 +450,18 @@ final class CyShineLiveActivityBridge: NSObject {
       steps.append("nowPlaying=reassigned")
     }
 
-    let summary = steps.joined(separator: " ") + " category=\(session.category.rawValue)"
+    let summary = steps.joined(separator: " ")
+      + " category=\(session.category.rawValue)"
+      + " others=\(session.isOtherAudioPlaying ? "yes" : "no")"
+      + " bundle=\(Bundle.main.bundleIdentifier ?? "?")"
     CyShineNativeLog.write("audio-session", summary)
-    return ["activated": activated, "summary": summary, "category": session.category.rawValue]
+    return [
+      "activated": activated,
+      "summary": summary,
+      "category": session.category.rawValue,
+      "bundleId": Bundle.main.bundleIdentifier ?? "",
+      "bundlePath": Bundle.main.bundleURL.path,
+    ]
   }
 
   /// 从 App Group 容器读封面；容器不可用时返回 nil（卡片仍会显示，只是没缩略图）。

@@ -172,13 +172,19 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   /// 并由原生把上一份 nowPlayingInfo 重新提交。
   ///
   /// 返回 true 表示会话已由原生重新激活，可以跳过随后的 setActive。
-  Future<bool> _reassertNowPlayingSession() async {
+  ///
+  /// [deactivate] 为 true 时走「停用 → 设分类 → 启用」的完整流程，只能在
+  /// **还没有声音输出**时用；为 false 时只重设分类并再激活一次，播放中调用
+  /// 也不会让声音断掉（用在「声音起来之后再确认一次」和回到前台时）。
+  Future<bool> _reassertNowPlayingSession({bool deactivate = true}) async {
     if (_reassertUnavailable || !Platform.isIOS || _allowMixWithOthers) {
       return false;
     }
     try {
-      final result = await _nowPlayingChannel
-          .invokeMapMethod<String, dynamic>('reassertSession');
+      final result = await _nowPlayingChannel.invokeMapMethod<String, dynamic>(
+        'reassertSession',
+        {'deactivate': deactivate},
+      );
       unawaited(
         AppLogger.write('audio-session', 'reassertSession $result'),
       );
@@ -192,6 +198,27 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
         AppLogger.write('audio-session', 'reassertSession 失败: $error'),
       );
       return false;
+    }
+  }
+
+  /// 播放中 / 回到前台时补一次「软」认领，不会打断正在输出的声音。
+  Future<void> reinforceNowPlayingSession() async {
+    if (!Platform.isIOS || !_player.playing) return;
+    await _reassertNowPlayingSession(deactivate: false);
+  }
+
+  /// 声音真正开始输出之后再连续确认两次。
+  ///
+  /// 系统的「当前播放应用」身份是在**有实际音频**之后才最终确定的，
+  /// 只在播放前认领一次，遇到被别的 App 占着归属的情况仍可能被忽略。
+  Future<void> _confirmNowPlayingSession() async {
+    for (final delay in const [
+      Duration(milliseconds: 500),
+      Duration(seconds: 2),
+    ]) {
+      await Future<void>.delayed(delay);
+      if (!_player.playing) return;
+      await reinforceNowPlayingSession();
     }
   }
 
@@ -666,7 +693,8 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
       final session = await AudioSession.instance;
       // 仅在「从没在播 → 开始播」这一刻做，避免暂停/继续以外的重复配置。
       // 原生成功重新激活时就不用再 setActive 一次了。
-      final reasserted = !_player.playing && await _reassertNowPlayingSession();
+      final reasserted = !_player.playing &&
+          await _reassertNowPlayingSession(deactivate: true);
       final granted = reasserted || await session.setActive(true);
       unawaited(
         AppLogger.write(
@@ -678,6 +706,7 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     }
     if (pauseGeneration != _pauseGeneration) return;
     await _player.play();
+    if (Platform.isIOS) unawaited(_confirmNowPlayingSession());
   }
 
   @override
