@@ -15,7 +15,7 @@ import WidgetKit
 /// 与主 App 侧共享的键名。改这里必须同步改 MusicHomeWidgetPlugin.SharedKey
 /// 与 CyShineLiveActivityBridge。
 enum CyShineWidgetKey {
-    static let appGroup = "group.com.cyshine.music"
+    static let appGroup = "group.com.cyshine.music.app2"
     static let title = "widget.title"
     static let artist = "widget.artist"
     static let playing = "widget.playing"

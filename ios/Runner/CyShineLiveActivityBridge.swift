@@ -21,6 +21,7 @@
 // 该文件由 tool/patch_xcodeproj.py 一并加进 Runner 的 Compile Sources。
 
 import ActivityKit
+import AVFoundation
 import Flutter
 import Foundation
 // MPNowPlayingInfoCenter / MPMediaItemArtwork 在 MediaPlayer 里。
@@ -37,7 +38,7 @@ final class CyShineLiveActivityBridge: NSObject {
   static let urlScheme = "cyshinemusic"
 
   /// 与 MusicHomeWidgetPlugin / Widget 扩展里保持一致。
-  static let appGroupIdentifier = "group.com.cyshine.music"
+  static let appGroupIdentifier = "group.com.cyshine.music.app2"
 
   private static let artworkDirectory = "artwork"
   private static let maxArtworkPixels: CGFloat = 256
@@ -145,6 +146,10 @@ final class CyShineLiveActivityBridge: NSObject {
       }
       applyUpdate(args)
       result(true)
+
+    case "reassertSession":
+      // 开始播放前重新认领一次 Now Playing 归属（见方法注释）。
+      result(reassertPlaybackSession())
 
     case "end":
       endActivity(policy: .immediate)
@@ -342,8 +347,12 @@ final class CyShineLiveActivityBridge: NSObject {
   ///   先写一份，保证卡片立刻可用；封面能拿到再补。
   ///
   ///   走的是同一份数据源（`start`/`update` 的 args），两侧不会打架。
+  /// 最近一次写进控制中心卡片的那份数据，`reassertPlaybackSession` 要拿它重发。
+  private var lastNowPlayingArgs: [String: Any]?
+
   private func publishNowPlayingInfo(_ args: [String: Any], artworkPath: String?) {
     guard let title = args["title"] as? String, !title.isEmpty else { return }
+    lastNowPlayingArgs = args
     var info: [String: Any] = [:]
     info[MPMediaItemPropertyTitle] = title
     info[MPMediaItemPropertyArtist] = (args["artist"] as? String) ?? ""
@@ -384,6 +393,60 @@ final class CyShineLiveActivityBridge: NSObject {
     }
 
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+  }
+
+  /// ★ 把「现在在播放的是谁」重新认领一次。
+  ///
+  ///   用签名工具侧载安装时，系统的 Now Playing 归属偶尔会记在安装方身上：
+  ///   音乐明明在放，控制中心却没有播放卡片，必须去「设置 → 栖弦 →
+  ///   允许与其他 APP 共同播放」拨一下再拨回来卡片才出现 —— 因为拨动开关会
+  ///   触发一次同样的音频会话重配置。这里把这一步在**开始播放之前**替用户做掉：
+  ///   停用 → 明确设成不可混音的 `.playback` → 启用，然后把上一份
+  ///   nowPlayingInfo 重新提交，逼系统重新读一次卡片内容。
+  ///
+  ///   调用时机必须是「还没有声音输出」的时候（播放前 / 暂停时），否则停用
+  ///   会话会让音频短暂断掉，听感上像卡了一下。
+  private func reassertPlaybackSession() -> [String: Any] {
+    let session = AVAudioSession.sharedInstance()
+    var steps: [String] = []
+
+    do {
+      try session.setActive(false)
+      steps.append("deactivate=ok")
+    } catch {
+      // 会话本来就没激活时会报错，属正常情况，不影响后面重新配置。
+      steps.append("deactivate=\(Self.describe(error))")
+    }
+
+    do {
+      try session.setCategory(.playback, mode: .default, options: [])
+      steps.append("category=playback")
+    } catch {
+      steps.append("category=\(Self.describe(error))")
+    }
+
+    var activated = false
+    do {
+      try session.setActive(true)
+      activated = true
+      steps.append("activate=ok")
+    } catch {
+      steps.append("activate=\(Self.describe(error))")
+    }
+
+    // 会话重新激活后必须再提交一次卡片数据：系统是在这一刻才回来读
+    // nowPlayingInfo 的，光有会话没有数据，卡片照样是空的。
+    if let info = lastNowPlayingArgs {
+      publishNowPlayingInfo(info, artworkPath: nil)
+      steps.append("nowPlaying=republished")
+    } else if let current = MPNowPlayingInfoCenter.default().nowPlayingInfo {
+      MPNowPlayingInfoCenter.default().nowPlayingInfo = current
+      steps.append("nowPlaying=reassigned")
+    }
+
+    let summary = steps.joined(separator: " ") + " category=\(session.category.rawValue)"
+    CyShineNativeLog.write("audio-session", summary)
+    return ["activated": activated, "summary": summary, "category": session.category.rawValue]
   }
 
   /// 从 App Group 容器读封面；容器不可用时返回 nil（卡片仍会显示，只是没缩略图）。

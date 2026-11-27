@@ -219,7 +219,7 @@ private struct CyShineTransportButtons: View {
 /// 从 App Group 共享容器读封面。容器不可用时返回 nil（不报错）。
 enum CyShineSharedArtwork {
     /// 必须与主 App 侧（CyShineLiveActivityBridge / MusicHomeWidgetPlugin）一致。
-    static let appGroupIdentifier = "group.com.cyshine.music"
+    static let appGroupIdentifier = "group.com.cyshine.music.app2"
 
     static func containerURL() -> URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)

@@ -7,6 +7,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:bass_player/bass_player.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -87,8 +88,7 @@ Future<PlayerAudioHandler> initializePlayerAudioHandler({
 class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
   PlayerAudioHandler({bool allowMixWithOthers = false, BassPlayer? player})
     : _player = player ?? BassPlayer(),
-      _allowMixWithOthers = allowMixWithOthers {
-    _playbackSubscription = _player.playbackEventStream.listen(_broadcastState);
+      _allowMixWithOthers = allowMixWithOthers {    _playbackSubscription = _player.playbackEventStream.listen(_broadcastState);
     _durationSubscription = _player.durationStream.listen(_updateDuration);
     _errorSubscription = _player.errorStream.listen((error) {
       _broadcastError(error, StackTrace.current);
@@ -153,6 +153,46 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
       'BASS ${info.version}; BASS_FX ${info.fxVersion}; '
           'plugins=${info.plugins.entries.map((entry) => '${entry.key}:${entry.value}').join(',')}',
     );
+  }
+
+  /// 与原生 `CyShineLiveActivityBridge` 同一条通道，借用它的 `reassertSession`。
+  static const MethodChannel _nowPlayingChannel = MethodChannel(
+    'cy_shine_music/live_activity',
+  );
+
+  /// 原生没注册这个方法（旧包 / 单元测试）时置位，之后不再重复尝试。
+  bool _reassertUnavailable = false;
+
+  /// iOS：开始播放前把「现在播放的是谁」重新认领一次。
+  ///
+  /// 侧载安装（用签名工具装 App）时系统的 Now Playing 归属偶尔会记在安装方
+  /// 身上：音乐在播、控制中心却没有卡片，必须去设置里把「允许与其他 APP
+  /// 共同播放」拨一下再拨回来才出现。拨动开关本质就是重新配置一次音频会话，
+  /// 这里把这步在播放前替用户做掉 —— 停用 → 设成不可混音的 playback → 启用，
+  /// 并由原生把上一份 nowPlayingInfo 重新提交。
+  ///
+  /// 返回 true 表示会话已由原生重新激活，可以跳过随后的 setActive。
+  Future<bool> _reassertNowPlayingSession() async {
+    if (_reassertUnavailable || !Platform.isIOS || _allowMixWithOthers) {
+      return false;
+    }
+    try {
+      final result = await _nowPlayingChannel
+          .invokeMapMethod<String, dynamic>('reassertSession');
+      unawaited(
+        AppLogger.write('audio-session', 'reassertSession $result'),
+      );
+      return result?['activated'] == true;
+    } on MissingPluginException {
+      _reassertUnavailable = true;
+      return false;
+    } catch (error) {
+      // 通道存在但原生抛错：不阻断播放，退回普通 setActive 即可。
+      unawaited(
+        AppLogger.write('audio-session', 'reassertSession 失败: $error'),
+      );
+      return false;
+    }
   }
 
   Future<void> setAllowMixWithOthers(bool value) async {
@@ -624,8 +664,16 @@ class PlayerAudioHandler extends BaseAudioHandler with SeekHandler {
       isAndroid: Platform.isAndroid,
     )) {
       final session = await AudioSession.instance;
-      final granted = await session.setActive(true);
-      unawaited(AppLogger.write('audio-session', 'activate granted=$granted'));
+      // 仅在「从没在播 → 开始播」这一刻做，避免暂停/继续以外的重复配置。
+      // 原生成功重新激活时就不用再 setActive 一次了。
+      final reasserted = !_player.playing && await _reassertNowPlayingSession();
+      final granted = reasserted || await session.setActive(true);
+      unawaited(
+        AppLogger.write(
+          'audio-session',
+          'activate granted=$granted reasserted=$reasserted',
+        ),
+      );
       if (!granted) return;
     }
     if (pauseGeneration != _pauseGeneration) return;
