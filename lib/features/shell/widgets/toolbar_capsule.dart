@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ui/liquid_glass.dart';
 import '../../../theme/app_motion.dart';
 import '../../player/player_controller.dart';
 import '../player_transition.dart';
@@ -31,21 +32,17 @@ class ToolbarCapsule extends StatelessWidget {
           duration: AppMotion.long,
           curve: AppMotion.emphasized,
           height: height,
-          decoration: BoxDecoration(
-            color: toolbarCapsuleColor(scheme),
+          // 胶囊本体改成「液态玻璃」：背景实时模糊 + 半透明染色 + 高光描边。
+          // 高度仍由 AnimatedContainer 负责动画（收起/展开时不闪），
+          // 玻璃壳只负责质感，所以里面塞一个 SizedBox.expand 撑满即可。
+          child: LiquidGlassSurface(
+            scheme: scheme,
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.52),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: scheme.shadow.withValues(
-                  alpha: scheme.brightness == Brightness.light ? 0.08 : 0.18,
-                ),
-                blurRadius: 28,
-                offset: const Offset(0, 10),
-              ),
-            ],
+            blurSigma: 26,
+            shadowOpacity: scheme.brightness == Brightness.light
+                ? 0.10
+                : 0.20,
+            child: const SizedBox.expand(),
           ),
         ),
       ),

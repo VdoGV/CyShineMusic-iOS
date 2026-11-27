@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_motion.dart';
+import 'app_page_transitions.dart';
 import 'color_style.dart';
 import 'custom_theme.dart';
 
@@ -71,6 +72,17 @@ class AppTheme {
       scaffoldBackgroundColor: colors?.background ?? base.appSurface,
       visualDensity: VisualDensity.standard,
       splashFactory: InkRipple.splashFactory,
+      // 全局改用渐隐渐显：App 里所有 push / pop 都走这条，不再有横推。
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: FadePageTransitionsBuilder(),
+          TargetPlatform.iOS: FadePageTransitionsBuilder(),
+          TargetPlatform.macOS: FadePageTransitionsBuilder(),
+          TargetPlatform.windows: FadePageTransitionsBuilder(),
+          TargetPlatform.linux: FadePageTransitionsBuilder(),
+          TargetPlatform.fuchsia: FadePageTransitionsBuilder(),
+        },
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: scheme.surface,
         foregroundColor: scheme.onSurface,

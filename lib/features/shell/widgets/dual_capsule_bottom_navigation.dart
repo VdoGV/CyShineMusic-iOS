@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ui/liquid_glass.dart';
 import '../../../theme/app_motion.dart';
 import '../player_transition.dart';
 import '../shell_navigation.dart';
@@ -194,37 +195,23 @@ class _DualCapsuleNavBar extends ConsumerWidget {
       width: width,
       height: height,
       child: RepaintBoundary(
-        child: AnimatedContainer(
-          duration: AppMotion.long,
-          curve: AppMotion.emphasized,
-          decoration: BoxDecoration(
-            color: toolbarCapsuleColor(scheme),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.52),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: scheme.shadow.withValues(
-                  alpha: scheme.brightness == Brightness.light ? 0.08 : 0.18,
-                ),
-                blurRadius: 28,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final actionWidth = constraints.maxWidth / actionCount;
-                  final actionHeight = constraints.maxHeight - 8;
-                  return Stack(
-                    alignment: Alignment.centerLeft,
-                    clipBehavior: Clip.none,
-                    children: [
+        // 双胶囊模式的导航条同样换成液态玻璃。宽高都是固定的，不需要
+        // 原来的 AnimatedContainer 饰面动画，直接上玻璃壳即可。
+        child: LiquidGlassSurface(
+          scheme: scheme,
+          borderRadius: BorderRadius.circular(999),
+          blurSigma: 26,
+          shadowOpacity: scheme.brightness == Brightness.light ? 0.10 : 0.20,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 5),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final actionWidth = constraints.maxWidth / actionCount;
+                final actionHeight = constraints.maxHeight - 8;
+                return Stack(
+                  alignment: Alignment.centerLeft,
+                  clipBehavior: Clip.none,
+                  children: [
                       AnimatedPositioned(
                         left: selectedIndex * actionWidth,
                         top: (constraints.maxHeight - actionHeight) / 2,
@@ -297,7 +284,6 @@ class _DualCapsuleNavBar extends ConsumerWidget {
             ),
           ),
         ),
-      ),
     );
   }
 }

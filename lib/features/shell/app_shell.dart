@@ -55,6 +55,13 @@ class _AppShellState extends ConsumerState<AppShell>
   String _playerReturnLocation = '/songs';
   late final AnimationController _toolbarRevealController;
 
+  /// 壳层内容区的不透明度（换标签页时从 0 淡入到 1）。
+  late final AnimationController _contentFade;
+  late final Animation<double> _contentFadeOpacity = CurvedAnimation(
+    parent: _contentFade,
+    curve: AppMotion.emphasizedDecelerate,
+  );
+
   /// Player reveal progress: 0 parks the player layer below the screen, 1
   /// seats it. This is the single source of truth for entering, leaving and
   /// dragging the player — the page itself never animates.
@@ -86,6 +93,14 @@ class _AppShellState extends ConsumerState<AppShell>
       vsync: this,
       value: 1,
       duration: AppMotion.medium,
+    );
+    // 页面切换的「渐显」：新页面从不透明 0 淡入到 1。
+    // 路由层的 push/pop 由 FadePageTransitionsBuilder 负责「渐隐」，
+    // 同一壳层内换标签页则由这条控制器补上「渐现」，两边合起来就是渐隐渐显。
+    _contentFade = AnimationController(
+      vsync: this,
+      value: 1,
+      duration: const Duration(milliseconds: 220),
     );
     final startsOnPlayer = widget.location == '/player';
     _settledExpanded = startsOnPlayer;
@@ -134,6 +149,7 @@ class _AppShellState extends ConsumerState<AppShell>
   void dispose() {
     _resetTopLevelBack();
     _toolbarRevealController.dispose();
+    _contentFade.dispose();
     _transition.dispose();
     _coverRotation.dispose();
     _pull.dispose();
@@ -186,6 +202,12 @@ class _AppShellState extends ConsumerState<AppShell>
         FocusManager.instance.primaryFocus?.unfocus();
       } else {
         _releaseRouteFocus();
+      }
+      // 换标签 / 换页面时让内容渐显。播放器进出走的是上滑动画，不掺和淡入。
+      final playerInvolved =
+          oldWidget.location == '/player' || widget.location == '/player';
+      if (!playerInvolved) {
+        _contentFade.forward(from: 0);
       }
     }
   }
@@ -701,7 +723,9 @@ class _AppShellState extends ConsumerState<AppShell>
                       color: pageBackground,
                       // Keep the outer navigator mounted across tab changes;
                       // its StatefulShellRoute owns the retained branch stacks.
-                      child: RepaintBoundary(
+                      child: FadeTransition(
+                        opacity: _contentFadeOpacity,
+                        child: RepaintBoundary(
                         child: ClipRect(
                           child: Listener(
                             behavior: HitTestBehavior.translucent,
@@ -716,6 +740,7 @@ class _AppShellState extends ConsumerState<AppShell>
                         ),
                       ),
                     ),
+                  ),
                   ),
                   if (contentLocation == '/')
                     const Positioned.fill(
